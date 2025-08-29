@@ -1,0 +1,247 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+import Layout from '@/layouts/Layout.astro';
+import { codeToHtml } from 'shiki';
+
+export async function getStaticPaths() {
+  const dir = path.resolve("src/shaders");
+  const files = fs.readdirSync(dir).filter(f => /\.(glsl|frag|vert)$/.test(f));
+
+  return files.map(file => {
+    const name = file.replace(/\.(glsl|frag|vert)$/, "");
+    return {
+      params: { name },
+    };
+  });
+}
+
+const { name } = Astro.params;
+
+const filePath = path.resolve("src/shaders", `${name}.glsl`);
+const fragmentShader = fs.readFileSync(filePath, 'utf-8');
+
+const vertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const highlightedCode = await codeToHtml(fragmentShader, {
+  lang: "glsl" ,
+  theme: "nord"
+});
+---
+
+<Layout>
+  <main class="main">
+    <canvas id="glsl-canvas"></canvas>
+    <div class="code__area">
+      <div class="code__title">GLSL Code</div>
+      <div class="code" set:html={highlightedCode} />
+    </div>
+    <a href="/" class="back-link">Back</a>
+  </main>
+</Layout>
+
+<style lang="scss">
+  .main {
+    margin-bottom: 5rem;
+  }
+
+  #glsl-canvas {
+  }
+
+  .back-link {
+    position: fixed;
+    bottom: 1rem;
+    left: var(--inline-size);
+  }
+
+  .code {
+    margin-top: 1rem;
+
+    &__area {
+      max-width: 800px;
+      margin-inline: auto;
+      padding-inline: var(--inline-size);
+      margin-top: 2rem;
+    }
+    &__title {
+      font-size: 1.25rem;
+    }
+  }
+</style>
+
+<script define:vars={{ name, vertexShader, fragmentShader }}>
+  window.name = name;
+  window.vertexShader = vertexShader;
+  window.fragmentShader = fragmentShader;
+</script>
+
+<script>
+  //@ts-ignore
+  import * as THREE from 'three';
+
+  class Canvas {
+    private canvas: HTMLCanvasElement;
+    private renderer: THREE.WebGLRenderer;
+    private scene: THREE.Scene;
+    private camera: THREE.PerspectiveCamera;
+    private material: THREE.ShaderMaterial;
+    private mesh: THREE.Mesh;
+    private startTime: number;
+
+    constructor(canvas: HTMLCanvasElement, vertexShader: string, fragmentShader: string) {
+      this.canvas = canvas;
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        preserveDrawingBuffer: true,
+        antialias: true,
+        alpha: true
+      });
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+
+      this.scene = new THREE.Scene();
+      this.scene.background = new THREE.Color(0xffffff);
+      this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      this.camera.position.z = 1.8;
+
+      this.material = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader,
+        uniforms: {
+          u_time: { value: 0.0 },
+          u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+        }
+      });
+
+      const geometry = new THREE.PlaneGeometry(2, 2);
+      this.mesh = new THREE.Mesh(geometry, this.material);
+      this.scene.add(this.mesh);
+
+      window.addEventListener('resize', () => this.onResize());
+      this.onResize();
+
+      this.startTime = performance.now();
+    }
+
+    onResize() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      this.renderer.setSize(width, height);
+
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+
+      this.material.uniforms.u_resolution.value.set(width, height);
+    }
+
+    start() {
+      const animate = (time: number) => {
+        this.material.uniforms.u_time.value = (time - this.startTime) * 0.001;
+        this.renderer.render(this.scene, this.camera);
+        requestAnimationFrame(animate);
+      }
+      requestAnimationFrame(animate)
+    }
+
+    saveJPG(filename = `${window.name}.jpg`) {
+      const width = this.renderer.domElement.width;
+      const height = this.renderer.domElement.height;
+
+      // RenderTarget を作成
+      const renderTarget = new THREE.WebGLRenderTarget(width, height);
+      this.renderer.setRenderTarget(renderTarget);
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+
+      // ピクセルを全体読み込み
+      const pixels = new Uint8Array(width * height * 4);
+      this.renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixels);
+
+      // 板ポリのスクリーン座標を計算
+      const geometry = this.mesh.geometry as THREE.PlaneGeometry;
+      geometry.computeBoundingBox();
+      const box = geometry.boundingBox!;
+      const vertices = [
+        new THREE.Vector3(box.min.x, box.min.y, 0),
+        new THREE.Vector3(box.max.x, box.min.y, 0),
+        new THREE.Vector3(box.max.x, box.max.y, 0),
+        new THREE.Vector3(box.min.x, box.max.y, 0),
+      ];
+
+      // 頂点をスクリーン座標に変換
+      const projector = new THREE.Vector3();
+      const screenCoords = vertices.map((v) => {
+        projector.copy(v).applyMatrix4(this.mesh.matrixWorld);
+        projector.project(this.camera);
+        return {
+          x: Math.round((projector.x * 0.5 + 0.5) * width),
+          y: Math.round((1 - (projector.y * 0.5 + 0.5)) * height),
+        };
+      });
+
+      // バウンディングボックスを決定
+      const minX = Math.max(0, Math.min(...screenCoords.map((p) => p.x)));
+      const maxX = Math.min(width, Math.max(...screenCoords.map((p) => p.x)));
+      const minY = Math.max(0, Math.min(...screenCoords.map((p) => p.y)));
+      const maxY = Math.min(height, Math.max(...screenCoords.map((p) => p.y)));
+
+      const cropWidth = maxX - minX;
+      const cropHeight = maxY - minY;
+
+      // 切り抜き用 Canvas
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = cropWidth;
+      offCanvas.height = cropHeight;
+      const ctx = offCanvas.getContext("2d");
+      if (!ctx) return;
+
+      // ImageData を作成してクロップ部分をコピー
+      const imageData = ctx.createImageData(cropWidth, cropHeight);
+      for (let y = 0; y < cropHeight; y++) {
+        const srcY = minY + y;
+        const srcStart = srcY * width * 4 + minX * 4;
+        const srcEnd = srcStart + cropWidth * 4;
+        const row = pixels.slice(srcStart, srcEnd);
+
+        // 上下反転に注意
+        imageData.data.set(row, (cropHeight - y - 1) * cropWidth * 4);
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      // PNG 保存
+      offCanvas.toBlob((blob) => {
+        if (!blob) return;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }, "image/jpg");
+    }
+  }
+
+  declare global {
+    interface Window {
+      name: string;
+      vertexShader: string;
+      fragmentShader: string;
+    }
+  }
+
+  const canvas = document.getElementById('glsl-canvas') as HTMLCanvasElement;
+  const app = new Canvas(canvas, window.vertexShader, window.fragmentShader);
+  app.start();
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "s" && e.metaKey) {
+      e.preventDefault();
+      app.saveJPG();
+    }
+  });
+
+</script>

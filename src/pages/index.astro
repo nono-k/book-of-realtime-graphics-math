@@ -1,25 +1,77 @@
 ---
-import Card from '@/components/ui/Card.astro';
-import { cardData } from '@/data/card-data';
+import fs from 'node:fs';
+import path from 'node:path';
 import Layout from '@/layouts/Layout.astro';
+
+const dir = path.resolve('src/shaders');
+const files = fs.readdirSync(dir).filter(f => /\.(glsl|frag|vert)$/.test(f));
+
+const shaders = files.map(name => ({
+  name: name.replace(/\.glsl$/, ''),
+  code: fs.readFileSync(path.join(dir, name), 'utf-8')
+}));
 ---
 
 <Layout>
-  <h1>TOPページ</h1>
+  <main class="main">
+    <header class="header">
+      <h1 class="header__title">GLSL Playground</h1>
+      <p class="header__lead">Based On 「<a href="https://gihyo.jp/book/2022/978-4-297-13034-3" target="_blank">リアルタイムグラフィックの数学</a>」</p>
+    </header>
 
-  <div class="card__container">
-    {cardData.map((card) => (
-      <Card card={card} />
-    ))}
-  </div>
+    <div class="grid">
+      {
+        shaders.map(shader => (
+          <a href={`/${shader.name}`} class="card">
+            <div class="card__img">
+              <img src={`images/${shader.name}.jpg`} alt="">
+            </div>
+          </a>
+        ))
+      }
+    </div>
+  </main>
 </Layout>
 
 <style lang="scss">
-  .card__container {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
-    margin: 3rem 2rem;
+  .main {
+    max-width: 800px;
+    margin-inline: auto;
     padding-inline: 1rem;
+    margin-top: 5rem;
+    margin-bottom: 5rem;
+  }
+
+  .header {
+    &__title {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+    &__lead {
+      margin-top: 0.25rem;
+      a {
+        text-decoration: underline;
+      }
+    }
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2rem;
+    margin-top: 2rem;
+  }
+
+  .card {
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    border-radius: 1rem;
+    box-shadow: 0 0 15px rgba(0,0,0,.2);
+
+    &__img {
+      border-radius: 0.25rem;
+      overflow: hidden;
+    }
   }
 </style>
