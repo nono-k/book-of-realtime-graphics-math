@@ -1,8 +1,8 @@
 import type { HeaderLink, SiteConfig } from '@/types/config';
 
 export const siteConfig: SiteConfig = {
-  siteTitle: 'My Site',
-  siteDesc: 'My Site Description',
+  siteTitle: 'Book Of Realtime Graphics Math',
+  siteDesc: 'リアルタイムグラフィックスの数学のサンプルコード集になります。',
   siteUrl: 'https://example.com',
   siteType: 'website',
   siteLocale: 'ja_JP',
