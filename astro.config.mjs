@@ -7,7 +7,8 @@ const { siteUrl } = siteConfig;
 
 // https://astro.build/config
 export default defineConfig({
-  site: siteUrl,
+  site: 'https://nono-k.github.io',
+  base: 'book-of-realtime-graphics-math',
   vite: {
     css: {
       preprocessorOptions: {
