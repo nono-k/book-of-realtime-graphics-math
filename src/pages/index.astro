@@ -10,6 +10,8 @@ const shaders = files.map(name => ({
   name: name.replace(/\.glsl$/, ''),
   code: fs.readFileSync(path.join(dir, name), 'utf-8')
 }));
+
+const siteBase = 'book-of-realtime-graphics-math'
 ---
 
 <Layout>
@@ -22,9 +24,9 @@ const shaders = files.map(name => ({
     <div class="grid">
       {
         shaders.map(shader => (
-          <a href={`/${shader.name}`} class="card">
+          <a href={`/${siteBase}/${shader.name}`} class="card">
             <div class="card__img">
-              <img src={`images/${shader.name}.jpg`} alt="">
+              <img src={`/${siteBase}/images/${shader.name}.jpg`} alt="">
             </div>
           </a>
         ))
