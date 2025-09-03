@@ -33,6 +33,8 @@ const highlightedCode = await codeToHtml(fragmentShader, {
   lang: "glsl" ,
   theme: "nord"
 });
+
+const siteBase = 'book-of-realtime-graphics-math';
 ---
 
 <Layout>
@@ -42,7 +44,7 @@ const highlightedCode = await codeToHtml(fragmentShader, {
       <div class="code__title">GLSL Code</div>
       <div class="code" set:html={highlightedCode} />
     </div>
-    <a href="/" class="back-link">Back</a>
+    <a href=`/${siteBase}` class="back-link">Back</a>
   </main>
 </Layout>
 
