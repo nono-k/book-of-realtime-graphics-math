@@ -116,7 +116,8 @@ const siteBase = 'book-of-realtime-graphics-math';
         fragmentShader,
         uniforms: {
           u_time: { value: 0.0 },
-          u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+          u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+          u_mouse: { value: new THREE.Vector2(0.0, 0.0) }
         }
       });
 
@@ -124,10 +125,18 @@ const siteBase = 'book-of-realtime-graphics-math';
       this.mesh = new THREE.Mesh(geometry, this.material);
       this.scene.add(this.mesh);
 
+      window.addEventListener('mousemove', (e) => this.onMouseMove(e));
       window.addEventListener('resize', () => this.onResize());
       this.onResize();
 
       this.startTime = performance.now();
+    }
+
+    onMouseMove(e: MouseEvent) {
+      const x = e.clientX;
+      const y = e.clientY;
+
+      this.material.uniforms.u_mouse.value.set(x, window.innerHeight - y);
     }
 
     onResize() {
@@ -225,6 +234,115 @@ const siteBase = 'book-of-realtime-graphics-math';
         URL.revokeObjectURL(a.href);
       }, "image/jpg");
     }
+
+    saveJPG1000_600(filename = `${window.name || 'glsl'}.jpg`, targetWidth = 1000, targetHeight = 600) {
+      // 保存前の状態を確保
+      const prevSize = this.renderer.getSize(new THREE.Vector2());
+      const prevPixelRatio = this.renderer.getPixelRatio();
+      const prevOutputEncoding = (this.renderer as any).outputEncoding;
+      const prevResolution = this.material.uniforms.u_resolution.value.clone();
+
+      // 後で必ず元に戻す
+      try {
+        // レンダラーをターゲット解像度に合わせる（ピクセル比は1に）
+        this.renderer.setPixelRatio(1);
+        this.renderer.setSize(targetWidth, targetHeight, false);
+
+        // 一時的なユニフォームを作る（既存ユニフォームをベースに、安全にコピー）
+        const originalUniforms = (this.material.uniforms as any);
+        const tempUniforms: { [k: string]: { value: any } } = {};
+        for (const k in originalUniforms) {
+          const v = originalUniforms[k].value;
+          // u_resolution は強制的にターゲットにする
+          if (k === 'u_resolution') {
+            tempUniforms[k] = { value: new THREE.Vector2(targetWidth, targetHeight) };
+          } else if (v && typeof v.clone === 'function') {
+            tempUniforms[k] = { value: v.clone() }; // Vector2/Vector3 などは clone()
+          } else {
+            tempUniforms[k] = { value: v }; // 数値/テクスチャ等はそのまま参照
+          }
+        }
+
+        // 一時マテリアル（シェーダー本体は元と同じ）
+        const tempMaterial = new THREE.ShaderMaterial({
+          vertexShader: (this.material as any).vertexShader,
+          fragmentShader: (this.material as any).fragmentShader,
+          uniforms: tempUniforms,
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false,
+        });
+
+        // 一時シーン + オーソカメラ（-1..1 の NDC 空間に合わせる）
+        const tmpScene = new THREE.Scene();
+        const tmpCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
+        tmpCamera.position.z = 1;
+
+        const quadGeo = new THREE.PlaneGeometry(2, 2);
+        const quad = new THREE.Mesh(quadGeo, tempMaterial);
+        tmpScene.add(quad);
+
+        // RenderTarget を作成してレンダリング
+        const rt = new THREE.WebGLRenderTarget(targetWidth, targetHeight, {
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+          format: THREE.RGBAFormat,
+          type: THREE.UnsignedByteType,
+          depthBuffer: false,
+          stencilBuffer: false,
+        });
+        // 出力エンコーディングを合わせておく（必要なら）
+        (rt.texture as any).encoding = prevOutputEncoding;
+
+        this.renderer.setRenderTarget(rt);
+        this.renderer.render(tmpScene, tmpCamera);
+        this.renderer.setRenderTarget(null);
+
+        // ピクセルを読み取る（bottom-left 起点なので後で上下反転する）
+        const pixels = new Uint8Array(targetWidth * targetHeight * 4);
+        this.renderer.readRenderTargetPixels(rt, 0, 0, targetWidth, targetHeight, pixels);
+
+        // offscreen canvas に入れて保存
+        const off = document.createElement('canvas');
+        off.width = targetWidth;
+        off.height = targetHeight;
+        const ctx = off.getContext('2d');
+        if (!ctx) {
+          rt.dispose();
+          tempMaterial.dispose();
+          quadGeo.dispose();
+          return;
+        }
+
+        const imageData = ctx.createImageData(targetWidth, targetHeight);
+        for (let y = 0; y < targetHeight; y++) {
+          const srcStart = y * targetWidth * 4;
+          const row = pixels.subarray(srcStart, srcStart + targetWidth * 4);
+          // WebGL の底辺起点 -> canvas の上辺起点に反転してコピー
+          imageData.data.set(row, (targetHeight - y - 1) * targetWidth * 4);
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        off.toBlob((blob) => {
+          if (!blob) return;
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }, 'image/jpeg', 0.92);
+
+        // 解放
+        rt.dispose();
+        tempMaterial.dispose();
+        quadGeo.dispose();
+      } finally {
+        // 必ず元に戻す
+        try { this.material.uniforms.u_resolution.value.copy(prevResolution); } catch (e) {}
+        this.renderer.setPixelRatio(prevPixelRatio);
+        this.renderer.setSize(prevSize.x, prevSize.y, false);
+      }
+    }
   }
 
   declare global {
@@ -243,6 +361,7 @@ const siteBase = 'book-of-realtime-graphics-math';
     if (e.key.toLowerCase() === "s" && e.metaKey) {
       e.preventDefault();
       app.saveJPG();
+      // app.saveJPG1000_600();
     }
   });
 
